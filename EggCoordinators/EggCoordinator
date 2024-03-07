@@ -1,0 +1,471 @@
+# --EggCoordinator-- 2/27/2024 9:47:11 AM
+
+#How many eggs have to be on the map before this unit cares to do anything?
+$EGG_START_ATK_ATM:250
+$EGG_STOP_ATK_ATM:50
+$START_INTERVAL:300
+#How often in frames do we care to check our stuff?
+$UPDATE_INTERVAL:300
+#when do we fire at something?
+$FIRE_AT_TARGET:300
+#When do we search for a target?
+$TARGET_SEARCH_INTERVAL:300
+#while attacking with eggs how often do we keep sending new eggs until min reached?
+$EGG_ATK_INTERVAL:300
+#How many times do we attack a target before we give up and fire at something else?
+$ATK_ATTEMPTS:10
+#How many times do we try to find a target before giving up?
+$FIND_TARGET_ATTEMPTS:10
+
+#Only meant for a single target, VIP_COORD_LIST is meant for a list of targets that need to be specified
+$SPECIFIC_TARGET_X:-1
+$SPECIFIC_TARGET_Z:-1
+
+#Only needs x and z coord because the code well fetch the y coord.
+#tell the Egg Coordinator multiple locations to hit with eggs,
+#SPECIFIC_TARGET_X and SPECIFIC_TARGET_Z are for telling the code
+#a single location while this is made for multiple locations
+#check the VIP Target section for more ways to tell the code what vip locs are hit
+$VIP_COORD_LIST_V2:""
+
+$TARGET_MODE:0
+
+
+@UnitRunner
+
+:UnitInit
+	once
+		0 ->attackState
+		SetTimer0(<-UpdateInterval)
+		SetUnitPopupEnabled(self true)
+		SetUnitOutlineEnabled(self true)
+		SetUnitOutlineMode(self true)
+		SetUnitUIText(self 0 "Directs Eggs of all things at a specific target!!!")
+		@CreateMapImage
+		@DisplayUnitData
+		@VisualState
+		V3(-1 0 -1) ->nullTarget
+		#GetUnitSpecifiedTarget(self) ->target
+		#<-nullTarget ->lastTarget
+		Split(<-VIP_COORD_LIST_V2 " ") ->vipPositions
+		CreateList ->vipCoords
+		do(GetListCount(<-vipPositions) 2 / 0)
+			I 2 * ->p
+			GetTerrainVector(<-vipPositions[<-p] <-vipPositions[<-p 1 +]) ->vipC
+			AppendToList(<-vipCoords <-vipC)
+		loop
+		#SetUnitDebugText(self "Starting VIP Target Coords Count " GetListCount(<-vipCoords) concat)
+		SetTimer0(<-START_INTERVAL)
+	endonce
+
+:UnitRunner
+	@DisplayUnitData
+	@VisualState
+	if(GetUnitSuppressCount(self) eq0)
+		SetUnitGrowsMesh(self true)
+		
+		#if(-?debugText not)
+		#	"" ->debugText
+		#endif
+		
+		if(GetTimer0 lte0)
+			
+			GetUnitsByType("egg" 0) ->eggs
+			GetUnitSpecifiedTarget(self) ->currentTarget
+			#ATK_ATTEMPTS
+			#0 ->atkCount
+			#0 ->findCount
+			#rules
+			#1) If not enough eggs reset to 0, clear target, and reset time to normal update interval
+			#1) If we have enough eggs, advance to 1
+			#2) If we have enough eggs but no target, find a target, if target lost but still enough eggs reset to 1 to find a new target
+			#2) If we have enough eggs and a target advance to 2, wait in 2 than advance to 3
+			#3) If in 3 Fire all eggs on map at target than reset to 0 after making all eggs explode when in range of target
+			#3) Maintain 3 until 0 eggs or min eggs, than reset to 0
+			switch
+				#not enough eggs, time doesn't need to matter
+				case(<-attackState 0 eq)
+					if(GetListCount(<-eggs) <-EGG_START_ATK_ATM gte)
+						1 ->attackState
+						SetTimer0(<-TARGET_SEARCH_INTERVAL)
+						#SetUnitDebugText(self "Advancing to ATK Stage 1! Time Now: " GetTimer0 GetTimeString concat)
+						#"Advancing to ATK Stage 1!" ->debugText
+					else
+						SetTimer0(<-UPDATE_INTERVAL)
+						#SetUnitDebugText(self "Staying at ATK Stage 0! Time Now: " GetTimer0 GetTimeString concat)
+						#"Staying at ATK Stage 0!" ->debugText
+					endif
+				endcase
+				#has enough eggs but no target and not time to fire
+				case(<-attackState 1 eq)
+					if(GetListCount(<-eggs) <-EGG_START_ATK_ATM lt)
+						0 ->attackState
+						ClearUnitSpecifiedTarget(self)
+						SetTimer0(<-UPDATE_INTERVAL)
+					endif
+					
+					if(<-currentTarget <-nullTarget eq <-currentTarget Vector0 eq or)
+						<-TARGET_MODE @FindATarget ->newTarget
+						if(<-newTarget <-nullTarget neq <-newTarget Vector0 neq and)
+							SetUnitSpecifiedTarget(self <-newTarget)
+							GetUnitSpecifiedTarget(self) ->currentTarget
+							<-nullTarget ->newTarget
+						else
+							ClearUnitSpecifiedTarget(self)
+						endif
+					endif
+					
+					if(GetListCount(<-eggs) <-EGG_START_ATK_ATM gte <-currentTarget <-nullTarget neq and <-currentTarget Vector0 neq and)
+						2 ->attackState
+						SetTimer0(<-FIRE_AT_TARGET)
+						#SetUnitDebugText(self "Advancing to ATK Stage 2! Time Now: " GetTimer0 GetTimeString concat)
+						#"Advancing to ATK Stage 2!" ->debugText
+						0 ->findCount
+					else
+						SetTimer0(<-TARGET_SEARCH_INTERVAL)
+						#FIND_TARGET_ATTEMPTS
+						if(<-findCount <-FIND_TARGET_ATTEMPTS gte)
+							0 ->attackState
+							ClearUnitSpecifiedTarget(self)
+							0 ->findCount
+						else
+							<-findCount 1 add ->findCount
+						endif
+						#SetUnitDebugText(self "Staying at ATK Stage 1! Time Now: " GetTimer0 GetTimeString concat)
+						#"Staying at ATK Stage 1!" ->debugText
+					endif
+				endcase
+				#Has enough eggs, Has Target, but not time to fire
+				case(<-attackState 2 eq)
+					if(GetListCount(<-eggs) <-EGG_START_ATK_ATM lt)
+						0 ->attackState
+						ClearUnitSpecifiedTarget(self)
+						SetTimer0(<-UPDATE_INTERVAL)
+					endif
+					if(GetListCount(<-eggs) <-EGG_START_ATK_ATM gte <-currentTarget <-nullTarget neq and)
+						3 ->attackState
+						SetTimer0(<-EGG_ATK_INTERVAL)
+						#SetUnitDebugText(self "Advancing to ATK Stage 3! Time Now: " GetTimer0 GetTimeString concat)
+						#"Advancing to ATK Stage 3!" ->debugText
+					else
+						SetTimer0(<-FIRE_AT_TARGET)
+						#SetUnitDebugText(self "Staying at ATK Stage 2! Time Now: " GetTimer0 GetTimeString concat)
+						#"Staying at ATK Stage 2!" ->debugText
+					endif
+				endcase
+				#Has enough eggs, Has Target, Time to fire
+				case(<-attackState 3 eq)
+					if(GetListCount(<-eggs) <-EGG_STOP_ATK_ATM lte)
+						0 ->attackState
+						ClearUnitSpecifiedTarget(self)
+						SetTimer0(<-UPDATE_INTERVAL)
+						0 ->atkCount
+						#SetUnitDebugText(self "Returning to ATK Stage 0! ATK Over!! Time Now: " GetTimer0 GetTimeString concat)
+						#"Returning to ATK Stage 0! ATK Over!!" ->debugText
+					else
+						if(<-atkCount <-ATK_ATTEMPTS gte)
+							0 ->attackState
+							ClearUnitSpecifiedTarget(self)
+							SetTimer0(<-UPDATE_INTERVAL)
+							0 ->atkCount
+							#SetUnitDebugText(self "Returning to ATK Stage 0! ATK Over!! Time Now: " GetTimer0 GetTimeString concat)
+							#"Returning to ATK Stage 0! ATK Over!!" ->debugText
+						else
+							<-eggs <-currentTarget 10 @FireOnTarget
+							SetTimer0(<-EGG_ATK_INTERVAL)
+							<-atkCount 1 add ->atkCount
+							#SetUnitDebugText(self "Staying at ATK Stage 3! Time Now: " GetTimer0 GetTimeString concat)
+							#"Staying at ATK Stage 3!" ->debugText
+						endif
+					endif
+				endcase
+			endswitch
+			if(GetTimer0 lte0)
+				SetTimer0(<-UPDATE_INTERVAL)
+				#SetUnitDebugText(self "Glitch Detected! Resetting interval with default!! ATK Mode: " <-attackState concat)
+				#"Glitch Detected! Resetting interval with default!!" ->debugText 
+			endif
+		endif
+		#SetUnitDebugText(self <-debugText " Time Now: " GetTimer0 GetTimeString " ATK Mode: " concat4 <-attackState concat)
+	endif
+
+#Get random loc, random structure, specific loc, vip targetlist
+:FindATarget
+	->targetMode 
+	#VIP Targets, Just like Unit Types or IDs here for VIP Targetting.
+	
+	<-nullTarget ->selectedCoord
+	if(-?fliteringList not)
+		CreateList ->fliteringList
+		AppendToList(<-fliteringList "airsac")
+		AppendToList(<-fliteringList "airsacbubble")
+		AppendToList(<-fliteringList "blob")
+		AppendToList(<-fliteringList "spore")
+		AppendToList(<-fliteringList "conversion")
+		AppendToList(<-fliteringList "damper")
+		AppendToList(<-fliteringList "egg")
+		AppendToList(<-fliteringList "ern")
+		AppendToList(<-fliteringList "forb")
+		AppendToList(<-fliteringList "infocache")
+		AppendToList(<-fliteringList "pterosaur")
+		#AppendToList(<-fliteringList "shrapnel") #Because who doesn't like 200+ eggs to the face after being stunned. :)
+		AppendToList(<-fliteringList "skimmer")
+		AppendToList(<-fliteringList "singularity")
+		AppendToList(<-fliteringList "wall")
+		AppendToList(<-fliteringList "crazonium")
+		#For those of you wondering this is the patrol unit from the Chanson CPACK, so yes you can tell this code to not look for certain custom units if needed
+		AppendToList(<-fliteringList "9dd3a81a-8e79-49d4-b1ec-3a831bd5964d")
+	endif
+		
+	
+	switch
+		#random coord on map
+		case (<-targetMode 0 eq)
+			GetRandMapCell ->cellZ ->cellX
+			GetTerrain(<-cellX <-cellZ) ->terrainHeight
+			V3(<-cellX <-terrainHeight <-cellZ) ->selectedCoord
+			
+			<-selectedCoord
+			return
+		endcase
+		#random structure on map
+		case (<-targetMode 1 eq)
+			"" ->unitType
+			GetUnitCell(self) ->cellZ ->cellX
+			2000 ->range
+			false ->isSquare
+			true ->is3D
+			false ->requireLOS
+			0 ->enemyState
+			0 ->builtState
+			0 ->imperviousState
+			GetTerrainVector(<-cellX <-cellZ) ->terrainVec
+			GetUnits(<-unitType V3(<-terrainVec.x <-terrainVec.y 1 add <-terrainVec.z) <-range <-isSquare <-is3D <-requireLOS <-enemyState <-builtState <-imperviousState) ->unfilteredSelectedUnits
+			#filter list of unwanted things like bullets, certain drones, other targets I don't want the list to be about
+			if(GetListCount(<-unfilteredSelectedUnits) gt0)
+				CreateList ->filteredUnitList
+				do(GetListCount(<-unfilteredSelectedUnits) 0)
+					
+					#First we filter out all the sub units in one go, than we filter out any typed units we don't care to find
+					if(GetUnitType(<-unfilteredSelectedUnits[I]) "" neq)
+						if(ListContains(<-fliteringList GetUnitType(<-unfilteredSelectedUnits[I])) not IsV3InMap(GetUnitPosition(<-unfilteredSelectedUnits[I])) and)
+							AppendToList( <-filteredUnitList <-unfilteredSelectedUnits[I])
+						endif
+					endif
+				loop
+			endif
+			if(GetListCount(<-filteredUnitList) gt0)
+				GetUnitPosition(<-filteredUnitList[RandInt(0 GetListCount(<-filteredUnitList))]) ->selectedCoord
+			endif
+			--unfilteredSelectedUnits
+			--filteredUnitList
+			
+			<-selectedCoord
+			return
+		endcase
+		#specific coord on map
+		case (<-targetMode 2 eq)
+			GetTerrainVector(<-SPECIFIC_TARGET_X <-SPECIFIC_TARGET_Z) ->selectedCoord
+			
+			<-selectedCoord
+			return
+		endcase
+		#random VIP on map
+		case (<-targetMode 3 eq)
+			GetUnitsByType("runway" 0) ->vipRunways
+			GetUnitsByType("rocketpad" 0) ->vipRocketpad
+			GetUnitsByType("microrift" 0) ->vipMicrorift
+			#The below link is how you add custom units to your VIP Targets list
+			#VDL Uplink Station
+			#GetUnitsByType("d246733c-da85-4551-9bd5-85ddd1f891da" 0) ->vipVDLUplinks
+			
+			GetERNPortal ->ernPortalID
+			GetFactory ->factoryID
+			GetRiftLab ->riftLabID
+			#VIP_COORD_LIST_V2
+			
+			#We're appending locations instead of IDs here because we're going to grab a loc anyways and because we're combining this list with a list of pure coords
+			CreateList ->vipTargetList
+			
+			if(GetUnitDestroyed(<-riftLabID) not -?riftLabID and)
+				AppendToList( <-vipTargetList GetUnitPosition(<-riftLabID))
+			endif
+			if(GetUnitDestroyed(<-factoryID) not -?factoryID and)
+				AppendToList( <-vipTargetList GetUnitPosition(<-factoryID))
+			endif
+			if(GetUnitDestroyed(<-ernPortalID) not -?ernPortalID and)
+				AppendToList( <-vipTargetList GetUnitPosition(<-ernPortalID))
+			endif
+			if(GetListCount(<-vipRunways) gt0)
+				do(GetListCount(<-vipRunways) 0)
+					if(GetUnitDestroyed(<-vipRunways[I]) not -?vipRunways[I] and)
+						AppendToList( <-vipTargetList GetUnitPosition(<-vipRunways[I]))
+					endif
+				loop
+			endif
+			if(GetListCount(<-vipRocketpad) gt0)
+				do(GetListCount(<-vipRocketpad) 0)
+					if(GetUnitDestroyed(<-vipRocketpad[I]) not -?vipRocketpad[I] and)
+						AppendToList( <-vipTargetList GetUnitPosition(<-vipRocketpad[I]))
+					endif
+				loop
+			endif
+			if(GetListCount(<-vipMicrorift) gt0)
+				do(GetListCount(<-vipMicrorift) 0)
+					if(GetUnitDestroyed(<-vipMicrorift[I]) not -?vipMicrorift[I] and)
+						AppendToList( <-vipTargetList GetUnitPosition(<-vipMicrorift[I]))
+					endif
+				loop
+			endif
+			#if(GetListCount(<-vipVDLUplinks) gt0)
+			#	do(GetListCount(<-vipVDLUplinks) 0)
+			#		if(GetUnitDestroyed(<-vipVDLUplinks[I]) not -?vipVDLUplinks[I] and)
+			#			AppendToList( <-vipTargetList GetUnitPosition(<-vipVDLUplinks[I]))
+			#		endif
+			#	loop
+			#endif
+			
+			#<-vipCoords The raw V3 Coords list of other targets that aren't units or buildings
+			if(GetListCount(<-vipCoords) gt0)
+				do(GetListCount(<-vipCoords) 0)
+					AppendToList( <-vipTargetList <-vipCoords[I])
+				loop
+			endif
+			#if we still don't have a target fire at self since we're in the VIP target section!
+			if(GetListCount(<-vipTargetList) lte0)
+				AppendToList( <-vipTargetList GetUnitPosition(self))
+			endif
+			if(GetListCount(<-vipTargetList) gt0)
+				#GetUnitPosition(<-vipTargetList[RandInt(0 GetListCount(<-vipTargetList))]) ->selectedCoord
+				<-vipTargetList[RandInt(0 GetListCount(<-vipTargetList))] ->selectedCoord
+			endif
+			
+			--vipTargetList
+			--vipRunways
+			--vipRocketpad
+			--vipMicrorift
+			#--vipVDLUplinks
+			--ernPortalID
+			--factoryID
+			--riftLabID
+			#SetUnitDebugText(self "List State At Count " GetListCount(<-vipTargetList) " Coord: " <-selectedCoord concat4 " List: " <-vipTargetList concat3)
+			<-selectedCoord
+			return
+		endcase
+	endswitch
+	
+	#<-selectedCoord
+	
+
+:FireOnTarget
+	->explodeRange ->selectedTargetV3 ->eggsList
+	#GetUnitsByType("egg" 0) ->eggs
+
+	do(GetListCount(<-eggsList) 0)
+		Table("moveto" <-selectedTargetV3) ->initData
+		SetEggOrbData(<-eggsList[I] <-initData)
+		#GetUnitCell(<-eggsList[I]) ->cellZ ->cellX
+		if (DistanceCell(GetUnitCell(<-eggsList[I]) <-selectedTargetV3.x <-selectedTargetV3.z) LTE (<-explodeRange 0.66 +))
+			DestroyUnit(<-eggsList[I] true true true)
+		endif
+	loop
+
+:VisualState
+	GetUnitSpecifiedTarget(self) ->target
+	#GetUnitCell(self) ->cellZ ->cellX
+	#RotateTowardsCell(<-cellX <-cellZ <-target.x <-target.z 1) ->angZ ->angX
+	if(<-target <-nullTarget neq -?target and)
+		RotateObjTowardsCell(self "PointerBase" <-target.x <-target.z 1)
+	else
+		GetUnitCell(self) ->cellZ ->cellX
+		RotateObjTowardsCell(self "PointerBase" <-cellX <-cellZ 1 add 1)
+	endif
+	switch
+		#not enough eggs, time doesn't need to matter
+		case(<-attackState 0 eq)
+			SetObjColor(self "PointerBase" V3(0 0 0))
+			
+		endcase
+		#has enough eggs but no target and not time to fire
+		case(<-attackState 1 eq)
+			SetObjColor(self "PointerBase" V3(0 0 1))
+			
+		endcase
+		#Has enough eggs, Has Target, but not time to fire
+		case(<-attackState 2 eq)
+			SetObjColor(self "PointerBase" V3(0 1 0))
+			
+		endcase
+		#Has enough eggs, Has Target, Time to fire
+		case(<-attackState 3 eq)
+			SetObjColor(self "PointerBase" V3(1 0 0))
+			
+		endcase
+	endswitch
+
+:DisplayUnitData
+	SetUnitPopupText0(self "Egg Coordinator")
+	if (GetUnitSuppressCount(self) lte0)
+		SetUnitOutlineColor(self V4(1 0 0 1))
+		switch
+			#not enough eggs, time doesn't need to matter
+			case(<-attackState 0 eq)
+				SetUnitPopupText1(self, "Finding " <-EGG_START_ATK_ATM " Eggs!" concat3)
+				SetUnitMiniMapText(self "Finding " <-EGG_START_ATK_ATM " Eggs!" concat3)
+			endcase
+			#has enough eggs but no target and not time to fire
+			case(<-attackState 1 eq)
+				SetUnitPopupText1(self, "Has " <-EGG_START_ATK_ATM " Eggs to launch, Finding target in " GetTimer0 GetTimeString concat4)
+				SetUnitMiniMapText(self "Has " <-EGG_START_ATK_ATM " Eggs to launch, Finding target in " GetTimer0 GetTimeString concat4)
+			endcase
+			#Has enough eggs, Has Target, but not time to fire
+			case(<-attackState 2 eq)
+				GetUnitSpecifiedTarget(self) ->target
+				SetUnitPopupText1(self, "Prepping " <-EGG_START_ATK_ATM " Eggs to launch at " <-target concat4 " in " GetTimer0 GetTimeString concat3)
+				SetUnitMiniMapText(self "Prepping " <-EGG_START_ATK_ATM " Eggs to launch at " <-target concat4 " in " GetTimer0 GetTimeString concat3)
+			endcase
+			#Has enough eggs, Has Target, Time to fire
+			case(<-attackState 3 eq)
+				GetUnitSpecifiedTarget(self) ->target
+				SetUnitPopupText1(self, "Launching at least " <-EGG_STOP_ATK_ATM " Eggs at " <-target concat4 "!!!!" concat)
+				SetUnitMiniMapText(self "Launching at least " <-EGG_STOP_ATK_ATM " Eggs at " <-target concat4 "!!!!" concat)
+			endcase
+		endswitch
+	else
+		SetUnitMiniMapText(self "Nullified!")
+		SetUnitPopupText1(self "Nullified!")
+		SetUnitOutlineColor(self V4(0 0 0 0))
+	endif
+
+
+#0 = transparent, 1 = white, 2 = black
+:CreateMapImage
+	Self
+	"000011110000
+	 000122221000
+	 000122221000
+	 000011110000
+	 000001100000
+	 000001100000
+	 000001100000
+	 000001100000
+	 000001100000
+	 000001100000
+	 000001100000
+	 222222222222" RemoveWhiteSpace SetUnitMiniMapImage
+	SetUnitMinimapImageColor(self V4(1 0 0 1))
+
+#---------------------- Builtin Functions
+
+:Awake
+	@UnitInit
+
+:Once
+	@UnitInit
+
+:_UICALLBACK
+	<-_DATA ->uiSlot
+	if (-?uiSlot <-uiSlot 2 eq and)
+		#Clear Target
+		ClearUnitSpecifiedTarget(self)
+	endif
